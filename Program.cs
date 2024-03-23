@@ -165,10 +165,8 @@ void PopulateOutputVar(HttpResponseMessage response, OutputVar outputVar, Concil
             ", [concilliation.PaymentProviderId, startDate, endDate])
         .First();
 
-    Console.WriteLine("Count " + count.count);
     int pageSize = 10000;
     int pages = (int)Math.Ceiling((double)count.count / pageSize);
-    Console.WriteLine("Pages " + pages);
     List<BaseJson> paymentsDB = new();
 
     for (int i = 1; i <= pages; i++)
@@ -227,6 +225,7 @@ void sendRequestToPSP(Concilliation concilliation, OutputVar outputVar)
     string PSPUrl = concilliation.Postback;
     ReqOutpuConcilliation reqOutpuConcilliation = new ReqOutpuConcilliation(outputVar);
     string serialized = JsonConvert.SerializeObject(reqOutpuConcilliation);
+    Console.WriteLine("Report: \n" + serialized);
     HttpContent content = new StringContent(serialized, Encoding.UTF8, "application/json");
     _ = httpClient.PostAsync(PSPUrl, content);
 }
