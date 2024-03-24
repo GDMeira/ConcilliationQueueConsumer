@@ -253,9 +253,9 @@ List<BaseJson> getPaymentsToProvider(Concilliation concilliation, ApixDbContext 
             INNER JOIN ""PixKey"" AS pk ON pk.""Id"" = p.""PixKeyId"" 
             INNER JOIN ""PaymentProviderAccount"" AS a ON a.""Id"" = pk.""PaymentProviderAccountId"" 
             WHERE 
-                a.""PaymentProviderId"" = {0}
+                p.""CreatedAt"" < {2}
                 AND p.""CreatedAt"" > {1}
-                AND p.""CreatedAt"" < {2}
+                AND a.""PaymentProviderId"" = {0}
             ", [concilliation.PaymentProviderId, startDate, endDate])
         .First();
 
@@ -275,9 +275,9 @@ List<BaseJson> getPaymentsToProvider(Concilliation concilliation, ApixDbContext 
             INNER JOIN ""PixKey"" AS pk ON pk.""Id"" = p.""PixKeyId"" 
             INNER JOIN ""PaymentProviderAccount"" AS a ON a.""Id"" = pk.""PaymentProviderAccountId"" 
             WHERE 
-                a.""PaymentProviderId"" = {0}
-                AND p.""CreatedAt"" > {1}
+                p.""CreatedAt"" > {1}
                 AND p.""CreatedAt"" < {2}
+                AND a.""PaymentProviderId"" = {0}
             ORDER BY p.""Id""
             LIMIT {3} OFFSET {4}
         ", [concilliation.PaymentProviderId, startDate, endDate, pageSize, offset])
