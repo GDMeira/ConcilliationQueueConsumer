@@ -146,12 +146,58 @@ HttpResponseMessage getConcilliationFile(Concilliation concilliation)
 
 void PopulateOutputVar(HttpResponseMessage response, OutputVar outputVar, Concilliation concilliation, ApixDbContext db)
 {
-    int GMT = -3;
-    DateTime startDate = concilliation.Date.ToDateTime(TimeOnly.MinValue).ToUniversalTime().AddHours(GMT);
-    DateTime endDate = concilliation.Date.ToDateTime(TimeOnly.MaxValue).ToUniversalTime().AddHours(GMT);
+    List<BaseJson> paymentsFromProviderDB = getPaymentsFromProvider(concilliation, db);
+    List<BaseJson> paymentsToProviderDB = getPaymentsToProvider(concilliation, db);
+    paymentsFromProviderDB.AddRange(paymentsToProviderDB);
+    Dictionary<int, string> databasePayments = paymentsFromProviderDB.ToDictionary(p => p.Id, p => p.Status);
+    paymentsFromProviderDB.Clear();
+    paymentsToProviderDB.Clear();
+
+    Dictionary<int, string> receivedPayments = new();
     string content = response.Content.ReadAsStringAsync().Result;
     string[] lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
+    foreach (string line in lines)
+    {
+        BaseJson baseJson = JsonConvert.DeserializeObject<BaseJson>(line) ??
+            throw new InvalidInputFileException("Invalid input file");
+
+        receivedPayments.Add(baseJson.Id, baseJson.Status);
+
+        if (!databasePayments.TryGetValue(baseJson.Id, out string? value))
+        {
+            outputVar.FileToDatabase.Add(baseJson.Id, baseJson.Status);
+        }
+        else if (value != baseJson.Status)
+        {
+            outputVar.DifferentStatus.Add(baseJson.Id, baseJson.Status);
+        }
+    };
+
+    foreach (KeyValuePair<int, string> payment in databasePayments)
+    {
+        if (!receivedPayments.TryGetValue(payment.Key, out string? value))
+        {
+            outputVar.DatabaseToFile.Add(payment.Key, payment.Value);
+        }
+    };
+}
+
+void sendRequestToPSP(Concilliation concilliation, OutputVar outputVar)
+{
+    string PSPUrl = concilliation.Postback;
+    ReqOutpuConcilliation reqOutpuConcilliation = new ReqOutpuConcilliation(outputVar);
+    string serialized = JsonConvert.SerializeObject(reqOutpuConcilliation);
+    Console.WriteLine("Report: \n" + serialized);
+    HttpContent content = new StringContent(serialized, Encoding.UTF8, "application/json");
+    _ = httpClient.PostAsync(PSPUrl, content);
+}
+
+List<BaseJson> getPaymentsFromProvider(Concilliation concilliation, ApixDbContext db)
+{
+    int GMT = -3;
+    DateTime startDate = concilliation.Date.ToDateTime(TimeOnly.MinValue).ToUniversalTime().AddHours(GMT);
+    DateTime endDate = concilliation.Date.ToDateTime(TimeOnly.MaxValue).ToUniversalTime().AddHours(GMT);
     Count count = db.Database
         .SqlQueryRaw<Count>(@"
             SELECT 
@@ -191,45 +237,57 @@ void PopulateOutputVar(HttpResponseMessage response, OutputVar outputVar, Concil
         paymentsDB.AddRange(part);
     }
 
-    Dictionary<int, string> databasePayments = paymentsDB.ToDictionary(p => p.Id, p => p.Status);
-    Dictionary<int, string> receivedPayments = new();
-
-    foreach (string line in lines)
-    {
-        BaseJson baseJson = JsonConvert.DeserializeObject<BaseJson>(line) ??
-            throw new InvalidInputFileException("Invalid input file");
-
-        receivedPayments.Add(baseJson.Id, baseJson.Status);
-
-        if (!databasePayments.TryGetValue(baseJson.Id, out string? value))
-        {
-            outputVar.FileToDatabase.Add(baseJson.Id, baseJson.Status);
-        }
-        else if (value != baseJson.Status)
-        {
-            outputVar.DifferentStatus.Add(baseJson.Id, baseJson.Status);
-        }
-    };
-
-    foreach (KeyValuePair<int, string> payment in databasePayments)
-    {
-        if (!receivedPayments.TryGetValue(payment.Key, out string? value))
-        {
-            outputVar.DatabaseToFile.Add(payment.Key, payment.Value);
-        }
-    };
+    return paymentsDB;
 }
 
-void sendRequestToPSP(Concilliation concilliation, OutputVar outputVar)
+List<BaseJson> getPaymentsToProvider(Concilliation concilliation, ApixDbContext db)
 {
-    string PSPUrl = concilliation.Postback;
-    ReqOutpuConcilliation reqOutpuConcilliation = new ReqOutpuConcilliation(outputVar);
-    string serialized = JsonConvert.SerializeObject(reqOutpuConcilliation);
-    Console.WriteLine("Report: \n" + serialized);
-    HttpContent content = new StringContent(serialized, Encoding.UTF8, "application/json");
-    _ = httpClient.PostAsync(PSPUrl, content);
-}
+    int GMT = -3;
+    DateTime startDate = concilliation.Date.ToDateTime(TimeOnly.MinValue).ToUniversalTime().AddHours(GMT);
+    DateTime endDate = concilliation.Date.ToDateTime(TimeOnly.MaxValue).ToUniversalTime().AddHours(GMT);
+    Count count = db.Database
+        .SqlQueryRaw<Count>(@"
+            SELECT 
+                COUNT(p.""Id"")
+            FROM ""Payment"" AS p
+            INNER JOIN ""PixKey"" AS pk ON pk.""Id"" = p.""PixKeyId"" 
+            INNER JOIN ""PaymentProviderAccount"" AS a ON a.""Id"" = pk.""PaymentProviderAccountId"" 
+            WHERE 
+                a.""PaymentProviderId"" = {0}
+                AND p.""CreatedAt"" > {1}
+                AND p.""CreatedAt"" < {2}
+            ", [concilliation.PaymentProviderId, startDate, endDate])
+        .First();
 
+    int pageSize = 10000;
+    int pages = (int)Math.Ceiling((double)count.count / pageSize);
+    List<BaseJson> paymentsDB = new();
+
+    for (int i = 1; i <= pages; i++)
+    {
+        int pageNumber = i;
+        int offset = (pageNumber - 1) * pageSize; 
+        List<BaseJson> part = db.Database
+            .SqlQueryRaw<BaseJson>(@"
+             SELECT 
+                p.""Id"", p.""Status""
+            FROM ""Payment"" AS p
+            INNER JOIN ""PixKey"" AS pk ON pk.""Id"" = p.""PixKeyId"" 
+            INNER JOIN ""PaymentProviderAccount"" AS a ON a.""Id"" = pk.""PaymentProviderAccountId"" 
+            WHERE 
+                a.""PaymentProviderId"" = {0}
+                AND p.""CreatedAt"" > {1}
+                AND p.""CreatedAt"" < {2}
+            ORDER BY p.""Id""
+            LIMIT {3} OFFSET {4}
+        ", [concilliation.PaymentProviderId, startDate, endDate, pageSize, offset])
+            .ToList();
+
+        paymentsDB.AddRange(part);
+    }
+
+    return paymentsDB;
+}
 public class Count
 {
     public int count { get; set; }
