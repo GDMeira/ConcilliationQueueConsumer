@@ -195,9 +195,8 @@ void sendRequestToPSP(Concilliation concilliation, OutputVar outputVar)
 
 List<BaseJson> getPaymentsFromProvider(Concilliation concilliation, ApixDbContext db)
 {
-    int GMT = -3;
-    DateTime startDate = concilliation.Date.ToDateTime(TimeOnly.MinValue).ToUniversalTime().AddHours(GMT);
-    DateTime endDate = concilliation.Date.ToDateTime(TimeOnly.MaxValue).ToUniversalTime().AddHours(GMT);
+    DateTime startDate = concilliation.Date.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
+    DateTime endDate = concilliation.Date.ToDateTime(TimeOnly.MaxValue).ToUniversalTime();
     Count count = db.Database
         .SqlQueryRaw<Count>(@"
             SELECT 
@@ -242,9 +241,8 @@ List<BaseJson> getPaymentsFromProvider(Concilliation concilliation, ApixDbContex
 
 List<BaseJson> getPaymentsToProvider(Concilliation concilliation, ApixDbContext db)
 {
-    int GMT = -3;
-    DateTime startDate = concilliation.Date.ToDateTime(TimeOnly.MinValue).ToUniversalTime().AddHours(GMT);
-    DateTime endDate = concilliation.Date.ToDateTime(TimeOnly.MaxValue).ToUniversalTime().AddHours(GMT);
+    DateTime startDate = concilliation.Date.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
+    DateTime endDate = concilliation.Date.ToDateTime(TimeOnly.MaxValue).ToUniversalTime();
     Count count = db.Database
         .SqlQueryRaw<Count>(@"
             SELECT 
